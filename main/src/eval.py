@@ -1,68 +1,64 @@
 # coding: utf-8
 import argparse
 import os
-import time
-
-import cv2
-import matplotlib.pyplot as plt
-import numpy as np
-import cv2
 import pathlib
-from dataclasses import dataclass
-from dataset import Dataset
-import torch
+
+import mlflow
+import numpy as np
 import segmentation_models_pytorch as smp
+import torch
 from torch.utils.data import DataLoader
-from augment import get_preprocessing, get_training_augmentation, get_validation_augmentation
+
+from augment import (get_preprocessing, get_training_augmentation,
+                     get_validation_augmentation)
+from dataset import Dataset
+from util import DatasetPath, ModelParam, Output, visualize
 
 
-@dataclass
-class DatasetPath:
-    x_path: pathlib.Path
-    y_path: pathlib.Path
+def arg_parse():
+    parser = argparse.ArgumentParser("Pytorch segmentation sample")
+    parser.add_argument("--input", "-i", default="../../../Datasets/PublicDatasets/CamVid", type=str, help="public dataset name")
+    parser.add_argument("--modeltype", "-mt", default="UNet++", type=str, choices=["UNet++", "FPN", "DeepLabv3+"], help="model type")
+    parser.add_argument(
+        "-encoder",
+        default="resnet34",
+        type=str,
+        choices=[
+            "mobilenet_v2",
+            "resnet34",
+            "resnet50",
+            "densenet121",
+            "efficientnet-b0",
+            "efficientnet-b4"],
+        help="encoder model type")
+    parser.add_argument("-model", default="model", type=str, help="output model path")
+    parser.add_argument("-mldir", default="mllogs/eval/mlruns", type=str, help="mlflow dir")
+    parser.add_argument("--experiment", "-ex", default="test", type=str, help="mlflow experiment")
+    parser.add_argument("--loglevel", default="debug", type=str, choices=["debug", "info", "warning", "error", "critical"], help="log level")
+    args = parser.parse_args()
 
-
-# helper function for data visualization
-def visualize(**images):
-    """PLot images in one row."""
-    n = len(images)
-    plt.figure(figsize=(16, 5))
-    for i, (name, image) in enumerate(images.items()):
-        plt.subplot(1, n, i + 1)
-        plt.xticks([])
-        plt.yticks([])
-        plt.title(' '.join(name.split('_')).title())
-        plt.imshow(image)
-    plt.show()
+    return args
 
 
 def main():
-    parser = argparse.ArgumentParser("Pytorch segmentation sample")
-    parser.add_argument("--input", "-i", default="../../../Datasets/PublicDatasets/CamVid", type=str, help="public dataset name")
-    parser.add_argument("-encoder", default="efficientnet-b4", type=str, help="encoder model type")
-    parser.add_argument("-model", default="model", type=str, help="output model path")
-    args = parser.parse_args()
-    print(args.input)
+    args = arg_parse()
 
     inputpath = pathlib.Path(args.input)
     test_set = DatasetPath(inputpath / "test", inputpath / "testannot")
 
-    #print('the number of image/label in the train: {}'.format(len(train_set.x_path.glob("*.png"))))
-    #print('the number of image/label in the validation: {}'.format(len(val_set.x_path.glob("*.png"))))
-    #print('the number of image/label in the test: '.format(len(test_set.x_path.glob("*.png"))))
-    #train_dataset = Dataset(str(train_set.x_path), str(train_set.y_path), classes=['car', 'pedestrian'])
+    classes = [item.strip() for item in open(inputpath / "class.txt", "r")]
 
-    #dataset = Dataset(x_train_dir, y_train_dir, classes=['car', 'pedestrian'])
+    model_param = ModelParam(args.modeltype, args.encoder)
+
+    modelpath = os.path.join(args.model, model_param.modeltype + "_" + model_param.encoder + ".pth")
+    output_param = Output(modelpath, args.experiment, args.mldir)
 
     # load best saved checkpoint
-    modelpath = os.path.join(args.model, args.encoder + ".pth")
     best_model = torch.load(modelpath)
 
-    #print(best_model)
+    # print(best_model)
+    preprocessing_fn = smp.encoders.get_preprocessing_fn(model_param.encoder, model_param.weights)
 
-    encoder_weights = 'imagenet'
-    preprocessing_fn = smp.encoders.get_preprocessing_fn(args.encoder, encoder_weights)
-    classes = ['sky', 'building', 'pole', 'road', 'pavement', 'tree', 'signsymbol', 'fence', 'car', 'pedestrian', 'bicyclist', 'unlabelled']
     # create test dataset
     test_dataset = Dataset(
         str(test_set.x_path),
@@ -89,10 +85,19 @@ def main():
 
     logs = test_epoch.run(test_dataloader)
 
+    print("dice_loss:{}, iou_score:{}".format(logs['dice_loss'], logs['iou_score']))
+
+    mlflow.set_tracking_uri(output_param.mldir)
+    mlflow.set_experiment(output_param.experiment)
+    with mlflow.start_run() as run:
+        # save result with mlflow
+        mlflow.log_metrics({"dice_loss": logs['dice_loss'], "iou_score": logs['iou_score']})
+
+    
     # test dataset without transformations for image visualization
     test_dataset_vis = Dataset(str(test_set.x_path), str(test_set.y_path), classes=classes)
 
-    for i in range(9):
+    for i in range(3):
         n = np.random.choice(len(test_dataset))
 
         image_vis = test_dataset_vis[n][0].astype('uint8')
@@ -106,61 +111,21 @@ def main():
         gt_mask = np.transpose(gt_mask, (1, 2, 0))
         pr_mask = np.transpose(pr_mask, (1, 2, 0))
 
-        gt_mask_gray = np.zeros((gt_mask.shape[0],gt_mask.shape[1]))
+        gt_mask_gray = np.zeros((gt_mask.shape[0], gt_mask.shape[1]))
 
         for ii in range(gt_mask.shape[2]):
-            gt_mask_gray = gt_mask_gray + 1/gt_mask.shape[2]*ii*gt_mask[:,:,ii]
+            gt_mask_gray = gt_mask_gray + 1 / gt_mask.shape[2] * ii * gt_mask[:, :, ii]
 
-        pr_mask_gray = np.zeros((pr_mask.shape[0],pr_mask.shape[1]))
+        pr_mask_gray = np.zeros((pr_mask.shape[0], pr_mask.shape[1]))
         for ii in range(pr_mask.shape[2]):
-            pr_mask_gray = pr_mask_gray + 1/pr_mask.shape[2]*ii*pr_mask[:,:,ii]
+            pr_mask_gray = pr_mask_gray + 1 / pr_mask.shape[2] * ii * pr_mask[:, :, ii]
 
         visualize(
-            image=image_vis, 
-            ground_truth_mask=gt_mask_gray, 
+            image=image_vis,
+            ground_truth_mask=gt_mask_gray,
             predicted_mask=pr_mask_gray
         )
-
-
-
-    """
-    encoder = args.encoder
-    encoder_weights = 'imagenet'
-    classes = ['sky', 'building', 'pole', 'road', 'pavement', 'tree', 'signsymbol', 'fence', 'car', 'pedestrian', 'bicyclist', 'unlabelled']
-    activation = 'softmax2d' # could be None for logits or 'softmax2d' for multicalss segmentation
-    n_classes = 1 if len(classes) == 1 else (len(classes) + 1)  # case for binary and multiclass segmentation
-
-    model = smp.UnetPlusPlus(
-        encoder_name=encoder,
-        encoder_weights=encoder_weights,
-        classes=n_classes, #len(CLASSES),
-        activation=activation,
-    )
-    preprocessing_fn = smp.encoders.get_preprocessing_fn(encoder, encoder_weights)
-
-    train_dataset = Dataset(
-        str(train_set.x_path),
-        str(train_set.y_path),
-        augmentation=get_training_augmentation(),
-        preprocessing=get_preprocessing(preprocessing_fn),
-        classes=classes,
-    )
-
-    valid_dataset = Dataset(
-        str(val_set.x_path),
-        str(val_set.y_path),
-        augmentation=get_validation_augmentation(),
-        preprocessing=get_preprocessing(preprocessing_fn),
-        classes=classes,
-    )
-
-    train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=1)
-    valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=1)
-
-    modelpath = os.path.join(args.model, encoder + ".pth")
-
-    train(model, train_loader, valid_loader, args.epoch, modelpath)
-    """
+    
 
 
 if __name__ == "__main__":

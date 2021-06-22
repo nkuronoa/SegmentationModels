@@ -19,13 +19,11 @@ class Dataset(BaseDataset):
 
     """
 
-    #CLASSES = ['sky', 'building', 'pole', 'road', 'pavement', 'tree', 'signsymbol', 'fence', 'car', 'pedestrian', 'bicyclist', 'unlabelled']
-
     def __init__(
             self,
             images_dir,
             masks_dir,
-            classes=CLASSES,
+            classes,
             augmentation=None,
             preprocessing=None,
     ):
@@ -34,7 +32,7 @@ class Dataset(BaseDataset):
         self.masks_fps = [os.path.join(masks_dir, image_id) for image_id in self.ids]
 
         # convert str names to class values on masks
-        self.class_values = [self.CLASSES.index(cls.lower()) for cls in classes]
+        self.class_values = [i for i in range(len(classes))]
 
         self.augmentation = augmentation
         self.preprocessing = preprocessing
