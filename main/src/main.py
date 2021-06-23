@@ -20,8 +20,6 @@ from dataset import Dataset
 from model import load_segment_model
 from util import DatasetPath, ModelParam, Output
 
-#from torch.utils.tensorboard import SummaryWriter
-
 
 @dataclass
 class TrainParam:
@@ -82,9 +80,6 @@ def train(model, train_loader, valid_loader, train_param, output_param, logger):
         verbose=True,
     )
 
-    # tensorboard
-    #writer = SummaryWriter(log_dir=output_param.logdir)
-
     max_score = 0
 
     train_dice_loss = []
@@ -129,7 +124,7 @@ def train(model, train_loader, valid_loader, train_param, output_param, logger):
         mlflow.log_metrics({"Loss/train": train_logs["dice_loss"], "Score/train": train_logs["iou_score"]})
         mlflow.log_metrics({"Loss/val": valid_logs["dice_loss"], "Score/val": valid_logs["iou_score"]})
 
-        mlflow.log_params({"epochs": train_param.epoch, "lr": train_param.lr})
+        mlflow.log_params({"epochs": train_param.epoch, "lr": train_param.lr, "batch": train_param.batch})
 
         mlflow.log_artifact(os.path.join(output_param.logdir, output_param.logname))
 

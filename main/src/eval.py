@@ -93,7 +93,6 @@ def main():
         # save result with mlflow
         mlflow.log_metrics({"dice_loss": logs['dice_loss'], "iou_score": logs['iou_score']})
 
-    
     # test dataset without transformations for image visualization
     test_dataset_vis = Dataset(str(test_set.x_path), str(test_set.y_path), classes=classes)
 
@@ -125,7 +124,6 @@ def main():
             ground_truth_mask=gt_mask_gray,
             predicted_mask=pr_mask_gray
         )
-    
 
 
 if __name__ == "__main__":
